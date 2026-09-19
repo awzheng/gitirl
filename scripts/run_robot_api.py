@@ -31,11 +31,18 @@ def main() -> None:
     current = WorldState(
         objects=(ObjectState("box_A", label="box", position="Y"),)
     )
+    token = (
+        os.environ.get("HOUSEBOT_ROBOT_TOKEN")
+        or os.environ.get("GITIRL_ROBOT_TOKEN")
+        or None
+    )
+    if arguments.host not in {"127.0.0.1", "localhost", "::1"} and token is None:
+        raise SystemExit("HOUSEBOT_ROBOT_TOKEN is required when listening off-host")
     server = RobotHTTPServer(
         MockRobotAdapter(current),
         host=arguments.host,
         port=arguments.port,
-        token=os.environ.get("GITIRL_ROBOT_TOKEN") or None,
+        token=token,
     )
     print(f"mock robot API: {server.base_url}")
     print("Ctrl-C to stop")

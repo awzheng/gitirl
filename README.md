@@ -1,74 +1,81 @@
-# gitirl-agent
+# Housebot Edge
 
-> Edge bridge between Daniel's GitIRL cloud app and Ryan/Sarah's robot code.
+> Thin integration service for a roommate/caretaker robot.
+
+The repository was originally `gitirl-agent`. The current MVP is simpler: Daniel's app finds a person/object or plans one caretaker job, this edge validates and translates it, and Ryan/Sarah's robot adapter performs the supported physical action.
 
 ```text
-Daniel cloud -- HTTP commands/state + SSE events --> gitirl-agent
-gitirl-agent -- high-level RobotAction over HTTP --> robot-side adapter
-robot-side adapter -- BBOS / Ryan-Sarah code --> BracketBot
+Daniel web/cloud (laptop or AWS)
+       │ HTTP caretaker job
+       ▼
+Housebot Edge (Andrew's laptop)
+       │ high-level RobotAction over HTTP
+       ▼
+Ryan/Sarah robot adapter (BracketBot host)
 ```
 
-This repository validates cloud input, converts Daniel's object/state payloads to stable internal types, sends high-level actions across `RobotAdapter`, and normalizes observations/results. It may verify and retry near the robot when that is useful.
+The edge currently accepts:
 
-**Do not move logic here unless it benefits from being close to the robot or cleanly isolates cloud and robot interfaces.**
+- Daniel's existing `point` job from `/api/object-life/{object_id}/point`.
+- A job containing confirmed `moved` operations.
 
-## Ownership
+It serializes physical jobs, rejects unsupported work, and caches completed job IDs in memory so an HTTP retry does not repeat a physical action. It never opens BBOS motor/control writers.
 
-This repo owns:
+## Run all three apps
 
-- Daniel JSON → `WorldState` / `RobotAction` translation.
-- The robot-neutral `RobotAdapter` boundary.
-- Conservative diff, restore, verification, and at-most-two retries.
-- HTTP/SSE adapters, JSONL/CLI development tools, mocks, and tests.
+Use the hackathon LAN for the physical loop. AWS is optional for Daniel's public/cloud components, not required for robot control.
 
-It does **not** own AWS, Supabase, Elastic, SMS, frontend, authentication, cloud persistence, cloud NLP, low-level motor control, BracketBot daemons, perception, manipulation, or VLA behavior.
-
-Only `moved` discrepancies become `MOVE_OBJECT`. Added, missing, relational, malformed, or unsupported work is reported instead of guessed.
-
-## Transport choice
-
-- **HTTP JSON** for commands, state snapshots, robot actions, and terminal results.
-- **SSE** for low-rate Daniel→edge notifications and progress events.
-- **HTTP POST** for optional camera frames; this is deferred.
-- **No WebSockets.** Continuous bidirectional transport is unnecessary for the current job model.
-
-Daniel-specific shapes live in [`protocol/daniel.py`](src/gitirl_agent/protocol/daniel.py) and [`transport/daniel_api.py`](src/gitirl_agent/transport/daniel_api.py). Robot-specific code stays behind [`robot/interface.py`](src/gitirl_agent/robot/interface.py).
-
-## Current robot boundary
-
-```python
-observe() -> WorldState
-execute(action: RobotAction) -> ActionResult
-```
-
-The robot-side HTTP template exposes `GET /v1/observation` and `POST /v1/actions`. Ryan/Sarah supply the backend; this repo does not call joints, torque, drive, or Sarah's `precision_placement.py` directly.
-
-Sarah's current script saves/replays named joint poses locally and opens safety-sensitive BBOS writers during `goto`. It is ongoing robot work, not yet an object-placement API.
-
-## Run
-
-Interactive mock:
+Robot-side API, mock for now:
 
 ```bash
-python3 scripts/run_dev.py
+HOUSEBOT_ROBOT_TOKEN=shared-robot-token \
+python3 scripts/run_robot_api.py --mock --host 0.0.0.0 --port 8765
 ```
 
-JSONL:
+Andrew's edge:
 
 ```bash
-python3 scripts/run_dev.py --jsonl
+HOUSEBOT_ROBOT_BASE_URL=http://ROBOT_IP:8765 \
+HOUSEBOT_ROBOT_TOKEN=shared-robot-token \
+HOUSEBOT_EDGE_TOKEN=shared-development-token \
+python3 scripts/run_edge_api.py --host 0.0.0.0 --port 8780
 ```
 
-Mock robot HTTP API:
+Daniel sends a complete job to:
 
-```bash
-python3 scripts/run_robot_api.py --mock
+```http
+POST http://ANDREW_IP:8780/v1/jobs
+Authorization: Bearer shared-development-token
+Content-Type: application/json
 ```
 
-Listen to Daniel's SSE feed:
+Health checks:
 
 ```bash
-GITIRL_CLOUD_BASE_URL=http://127.0.0.1:8000 python3 scripts/listen_cloud.py
+curl http://ANDREW_IP:8780/health
+curl http://ROBOT_IP:8765/health
+```
+
+## Example caretaker job
+
+```json
+{
+  "job_id": "job_demo_1",
+  "command": "point",
+  "object_id": "keys_7c2e",
+  "target_pose": {"x": 0.8, "y": 0.3, "z": 0.9},
+  "zone": "shelf"
+}
+```
+
+This becomes `POINT_AT_OBJECT`; Ryan/Sarah still need to implement that capability behind `RobotAdapter`.
+
+## Development
+
+Mock everything in one process:
+
+```bash
+python3 scripts/run_edge_api.py --mock
 ```
 
 Tests:
@@ -77,4 +84,8 @@ Tests:
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 ```
 
-There are no required third-party runtime dependencies. See [`docs/INTEGRATION.md`](docs/INTEGRATION.md) before connecting real services.
+For the first shared-Wi-Fi integration session, follow [MVP_TEST_PLAN.md](docs/MVP_TEST_PLAN.md).
+
+## Naming
+
+`Housebot Edge` is the working product/service name. The repository and Python namespace remain `gitirl` / `gitirl_agent` temporarily to avoid breaking imports and teammate links during the hackathon. Rename them only after the team confirms the pivot; see [ARCHITECTURE.md](docs/ARCHITECTURE.md).

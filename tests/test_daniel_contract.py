@@ -3,6 +3,7 @@ import unittest
 from src.gitirl_agent.planner.models import ActionType
 from src.gitirl_agent.protocol.daniel import (
     DanielContractError,
+    point_action_from_daniel_job,
     robot_actions_from_daniel_job,
     world_state_from_daniel,
 )
@@ -76,6 +77,19 @@ class DanielContractTests(unittest.TestCase):
             world_state_from_daniel(
                 {"objects": [{"object_id": "box_A", "pose": {"x": 1, "y": 2}}]}
             )
+
+    def test_point_job_becomes_point_action(self):
+        action = point_action_from_daniel_job(
+            {
+                "job_id": "job_point",
+                "command": "point",
+                "object_id": "keys_7c2e",
+                "target_pose": {"x": 0.8, "y": 0.3, "z": 0.9},
+                "zone": "shelf",
+            }
+        )
+        self.assertEqual(action.action_type, ActionType.POINT_AT_OBJECT)
+        self.assertEqual(action.target.position["z"], 0.9)
 
 
 if __name__ == "__main__":

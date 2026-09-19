@@ -42,14 +42,22 @@ class HTTPRobotAdapter:
 
     @classmethod
     def from_environment(cls) -> Optional["HTTPRobotAdapter"]:
-        base_url = os.environ.get("GITIRL_ROBOT_BASE_URL", "").strip()
+        base_url = (
+            os.environ.get("HOUSEBOT_ROBOT_BASE_URL")
+            or os.environ.get("GITIRL_ROBOT_BASE_URL", "")
+        ).strip()
         if not base_url:
             return None
         return cls(
             base_url,
-            token=os.environ.get("GITIRL_ROBOT_TOKEN") or None,
+            token=(
+                os.environ.get("HOUSEBOT_ROBOT_TOKEN")
+                or os.environ.get("GITIRL_ROBOT_TOKEN")
+                or None
+            ),
             timeout_seconds=float(
-                os.environ.get("GITIRL_ROBOT_TIMEOUT_SECONDS", "60")
+                os.environ.get("HOUSEBOT_ROBOT_TIMEOUT_SECONDS")
+                or os.environ.get("GITIRL_ROBOT_TIMEOUT_SECONDS", "60")
             ),
         )
 

@@ -1,27 +1,22 @@
-# Demo
+# Caretaker demo
 
-This is a 60-second judge-demo structure, not final spoken copy.
+## Live demo
 
-## Live Demo
+1. Ask: “Where are my keys?”
+2. Daniel's UI shows the matched object and why it matched.
+3. The edge receives the complete point job.
+4. The robot points at the last-known location.
+5. UI reports the terminal result.
 
-1. “Software has version control. The physical world doesn't.”
-2. Show the room in its **STUDY** state.
-3. Commit the state.
-4. Physically mess up the environment.
-5. Show status/diff.
-6. Request restoration.
-7. Robot restores the environment.
-8. Verification succeeds.
-9. End on: “Working room clean.”
+Optional upgrade: ask the robot to put one curated object back.
 
-## Backup Demo
+## Backup demo
 
-TBD: capture a reliable pre-recorded run and retain a clear before/after view once the prototype exists.
+Use the same cloud and edge path with the mock robot adapter, clearly labelled as a mock.
 
-## Judge Q&A
+## Failure recovery
 
-TBD: answer from confirmed hardware behavior, measured reliability, and actual implementation choices only.
-
-## Failure Recovery
-
-TBD: define a concise, safe fallback once failure signals and recovery options are confirmed.
+- Unknown/ambiguous object: ask for clarification.
+- Robot busy: do not start another action.
+- Action failure: report it; do not blindly replay.
+- Manipulation unreliable: keep the point-only demo.

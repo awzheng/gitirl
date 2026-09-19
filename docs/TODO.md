@@ -1,23 +1,22 @@
-# TODO
+# MVP TODO
 
-## Before robot
+## Before robot integration
 
-- [ ] Exchange one full Daniel job fixture and one result fixture.
-- [ ] Decide full-job SSE versus SSE job ID + HTTP job fetch.
-- [ ] Add end-to-end job idempotency after Daniel defines replay semantics.
-- [ ] Keep the full standard-library test suite passing.
+- [ ] Exchange one real Daniel `point` job fixture.
+- [ ] Run Daniel → edge mock successfully.
+- [ ] Agree on synchronous result versus Daniel callback endpoint.
+- [ ] Confirm pose frame, units, confidence gate, and `job_id` rules.
 
-## After Daniel contract
+## Robot integration
 
-- [ ] Adapt only `protocol/daniel.py` and `transport/daniel_api.py`.
-- [ ] Wire authenticated job receipt and result/progress POSTs.
-- [ ] Confirm canonical pose frame/units and desired-state retrieval.
-- [ ] Run Daniel → mock robot → Daniel once, then replay the same job safely.
+- [ ] Ryan/Sarah implement one finite `POINT_AT_OBJECT` action.
+- [ ] Confirm world-to-robot transform and writer ownership.
+- [ ] Return structured terminal success/failure.
+- [ ] Run the real point demo five times.
 
-## After BracketBot API
+## Only after P0
 
-- [ ] Implement semantic `observe()` with stable object IDs.
-- [ ] Implement terminal `execute()` behind `RobotAdapter`.
-- [ ] Confirm world-to-robot transform, tolerances, timeouts, and recovery.
-- [ ] Map only supported robot actions; reject everything else.
-- [ ] Run one-object restore five times in a row.
+- [ ] Add one curated `MOVE_OBJECT` action.
+- [ ] Add fresh-observation verification.
+- [ ] Add durable job idempotency/restart recovery.
+- [ ] Decide final product and repository name.

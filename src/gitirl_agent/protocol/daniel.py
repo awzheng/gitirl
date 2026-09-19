@@ -9,7 +9,7 @@ about cloud-specific fields.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping, Optional, Sequence, Tuple
+from typing import Any, Mapping, Optional, Tuple
 
 from src.gitirl_agent.planner.models import ActionType, RobotAction
 from src.gitirl_agent.state.models import ObjectState, WorldState
@@ -134,6 +134,38 @@ def robot_actions_from_daniel_job(
         )
 
     return DanielJobTranslation(tuple(actions), tuple(unsupported))
+
+
+def point_action_from_daniel_job(document: Mapping[str, Any]) -> RobotAction:
+    """Normalize Daniel's current ``/api/object-life/{id}/point`` job."""
+
+    job_id = document.get("job_id")
+    object_id = document.get("object_id")
+    if not isinstance(job_id, str) or not job_id:
+        raise DanielContractError("point job requires job_id")
+    if document.get("command") != "point":
+        raise DanielContractError("point job command must be point")
+    if not isinstance(object_id, str) or not object_id:
+        raise DanielContractError("point job requires object_id")
+    position, orientation = _pose(document.get("target_pose"), f"{object_id}.target_pose")
+    target = ObjectState(
+        object_id=object_id,
+        position=position,
+        orientation=orientation,
+        metadata={"zone": document.get("zone"), **DANIEL_POSE_METADATA},
+    )
+    return RobotAction(
+        action_type=ActionType.POINT_AT_OBJECT,
+        request_id=job_id,
+        object_id=object_id,
+        target=target,
+        metadata={
+            "source": "daniel_object_point",
+            "job_id": job_id,
+            "pointing_at": document.get("pointing_at"),
+            **DANIEL_POSE_METADATA,
+        },
+    )
 
 
 def _state_object(value: Any, sha: Optional[str]) -> ObjectState:

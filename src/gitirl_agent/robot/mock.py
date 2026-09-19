@@ -38,6 +38,13 @@ class MockRobotAdapter:
             return ActionResult(ActionStatus.RETRYABLE, "simulated action failure")
 
         if (
+            action.action_type is ActionType.POINT_AT_OBJECT
+            and action.object_id is not None
+            and action.target is not None
+        ):
+            return ActionResult(ActionStatus.SUCCESS, "simulated point complete")
+
+        if (
             action.action_type is not ActionType.MOVE_OBJECT
             or action.object_id is None
             or action.target is None

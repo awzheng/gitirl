@@ -1,1 +1,1 @@
-# No runtime dependencies. Robot HTTP and cloud HTTP/SSE use the standard library.
+# No runtime dependencies. Edge and robot HTTP use the standard library.

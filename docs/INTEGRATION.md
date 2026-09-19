@@ -1,79 +1,60 @@
-# Integration tonight
+# Caretaker integration
 
-## What is already confirmed
+## Daniel → edge
 
-Daniel's current repo is available locally at `../hack-the-north` and currently exposes:
+Daniel's current useful endpoints are:
 
-- `GET /api/events`: SSE (`status`, `job`, `capture`, `conflict`, `telemetry`).
-- `POST /api/command`: validates/plans a command and returns a job containing `ops`.
-- `GET /api/state?ref=...`: objects with canonical world poses.
-- `POST /api/internal/event`: **loopback-only**, unsuitable for a remote edge process.
+- `GET /api/search?q=...`
+- `GET /api/object-life/{object_id}`
+- `POST /api/object-life/{object_id}/point`
 
-`protocol/daniel.py` understands the current state/job shapes. `transport/daniel_api.py` contains all HTTP/SSE calls.
+The point endpoint already returns `job_id`, `object_id`, `target_pose`, and `zone`. Daniel should forward that complete response to:
 
-BracketBot exposes local BBOS readers. Sarah's current `precision_placement.py` is not a service API; do not invoke it from middleware.
+```http
+POST http://ANDREW_IP:8780/v1/jobs
+Authorization: Bearer <HOUSEBOT_EDGE_TOKEN>
+```
 
-## Need from Daniel
+Do not use Daniel's SSE job summary for execution: it omits the target pose/operations.
 
-- Base HTTP URL and authentication.
-- Decide how an executable job reaches the edge:
-  - include full `ops` in the SSE `job` event, or
-  - include a job ID and add an authenticated `GET /api/jobs/{id}`.
-- An authenticated, non-loopback endpoint for acknowledgements, progress, and terminal results.
-- Authoritative job/result schemas and error codes.
-- `request_id`/`job_id` ownership, idempotency, replay, and cancellation rules.
-- Confirm that `/api/state` remains the desired-state source.
-- Confirm pose frame/units: current code says canonical world Z-up, metres, yaw-axis degrees.
-- SSE reconnect/replay expectations and which job states are executable.
-- A local test endpoint and one real fixture.
+Still needed from Daniel:
 
-Until those exist, `scripts/listen_cloud.py` can observe events but intentionally cannot move the robot.
+- one real point-job fixture;
+- one result callback endpoint, or acceptance of the synchronous edge response;
+- stable `job_id` semantics;
+- confirmation that object poses are canonical world Z-up/metres/yaw-degrees;
+- an agreed confidence/ambiguity gate.
 
-## Need from Ryan/Sarah
+## Edge → robot
 
-- A callable/service boundary for one supported object move.
-- Exact request shape accepted by their code.
-- World-to-robot pose transform and frame/unit rules.
-- Stable object identity between observations.
-- Fresh semantic observation shape after an action.
-- Terminal success, retryable failure, hard failure, timeout, and cancellation semantics.
-- Whether execution blocks until terminal or returns a job ID.
-- Safe single ownership of BBOS control/torque writers.
-- Physical verification tolerances.
-- Recovery/reset procedure and measured latency.
+The edge calls:
 
-They need to implement `RobotAPIBackend.observe()` and `RobotAPIBackend.execute()` in their own robot-side adapter. The HTTP template is in `robot/http_server.py`; no BBOS writer behavior is assumed.
+- `GET /health`
+- `GET /v1/observation?request_id=...`
+- `POST /v1/actions`
 
-## First integration test: Daniel + mock
+Still needed from Ryan/Sarah:
 
-1. Daniel creates a job with one `moved` op.
-2. Edge receives the full job by the agreed HTTP/SSE path.
-3. `robot_actions_from_daniel_job()` produces one `MOVE_OBJECT`.
-4. `HTTPRobotAdapter` sends it to `scripts/run_robot_api.py --mock`.
-5. Edge returns a correlated terminal result to Daniel.
+- a real `RobotAPIBackend` implementation;
+- support for one finite `POINT_AT_OBJECT` or `MOVE_OBJECT` action;
+- world-to-robot coordinate conversion;
+- terminal success/retryable/failure semantics;
+- writer-busy detection, timeout, cancellation, and torque release;
+- a fresh observation if physical verification is used.
 
-Pass: one `job_id` is preserved end to end and replaying it does not execute twice.
+Sarah's current named joint-pose CLI is not yet this service contract and must not be invoked concurrently with another BBOS writer.
 
-## Second integration test: real robot
+## First demo path
 
-1. Replace only the mock robot backend.
-2. Observe one known object.
-3. Transform one canonical world target into the robot's confirmed frame.
-4. Execute one supported move and receive a terminal result.
-5. Re-observe and verify within measured tolerance.
+```text
+“Where are my keys?”
+→ Daniel /api/search
+→ keys_7c2e
+→ Daniel /point job
+→ POST complete job to Housebot Edge
+→ POINT_AT_OBJECT
+→ robot points
+→ terminal result returned
+```
 
-## Files to touch
-
-Daniel contract changes:
-
-- `src/gitirl_agent/protocol/daniel.py`
-- `src/gitirl_agent/transport/daniel_api.py`
-- composition in `scripts/` only
-
-Robot contract changes:
-
-- `src/gitirl_agent/robot/interface.py`
-- `src/gitirl_agent/robot/http_contract.py`
-- Ryan/Sarah's concrete backend behind `robot/http_server.py`
-
-Do not spread either side's fields into `state/`, `planner/`, `verification/`, or orchestration.
+Do this five times before adding manipulation, Git history, or NLP polish.

@@ -1,8 +1,8 @@
 # Local development protocol
 
-These envelopes are for CLI/JSONL development. They are not Daniel's HTTP/SSE contract.
+These envelopes are legacy CLI/JSONL development fixtures. They are not the caretaker HTTP contract.
 
-> **Daniel's backend schema is authoritative. Adapt `protocol/daniel.py` and `transport/daniel_api.py` rather than spreading backend-specific assumptions throughout gitirl-agent.**
+> **Daniel's backend schema is authoritative. Adapt `protocol/daniel.py` rather than spreading backend-specific assumptions throughout the edge.**
 
 ## Envelope
 

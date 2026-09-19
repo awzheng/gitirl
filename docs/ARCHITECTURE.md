@@ -1,84 +1,50 @@
-# Architecture
+# Housebot architecture
 
-## Responsibility
-
-`gitirl-agent` is a thin edge bridge:
+## MVP
 
 ```mermaid
 flowchart TD
-    D[Daniel cloud<br/>Elastic, state, UI, NLP] -->|HTTP state/commands<br/>SSE notifications| C[Cloud boundary]
-    C --> N[Normalize and validate]
-    N --> A[High-level RobotAction]
-    A --> R[RobotAdapter]
-    R --> S[Ryan/Sarah robot stack]
-    S -->|observation / terminal result| R
-    R --> V[Verify; retry at most twice]
-    V -->|HTTP result/progress| C
+    U[User] --> D[Daniel web/cloud<br/>search, object history, UI]
+    D -->|POST complete caretaker job| E[Housebot Edge]
+    E -->|POINT_AT_OBJECT / MOVE_OBJECT| A[RobotAdapter HTTP]
+    A --> R[Ryan/Sarah BracketBot code]
+    R -->|terminal ActionResult| A
+    A --> E
+    E -->|terminal job result| D
 ```
 
-**Do not move logic into gitirl-agent unless it benefits from being close to the robot or cleanly isolates cloud and robot interfaces.**
+Daniel's current backend already searches objects and produces a complete `point` job, but labels it `executor: not_connected`. Housebot Edge fills that executor gap.
 
-It does not own AWS, Supabase, Elastic, SMS, frontend, authentication, cloud persistence/NLP/orchestration, BracketBot internals, perception, manipulation, VLA logic, or motor control.
+## Responsibilities
 
-## Boundaries
+Daniel owns UI, Elastic search, object history, cloud data, authentication, and any NLP. Ryan/Sarah own perception, world-to-robot transforms, manipulation, BBOS writer safety, and terminal robot results.
 
-Daniel-specific JSON is isolated to:
+Andrew's edge owns only:
 
-- `protocol/daniel.py`: Daniel state/job payloads → internal types.
-- `transport/daniel_api.py`: HTTP requests and SSE subscription.
+- strict cloud-job validation and translation;
+- one-at-a-time robot execution;
+- job correlation and process-local duplicate suppression;
+- normalized results and end-to-end testing.
 
-Robot-specific behavior is isolated to:
+## Transport
 
-- `robot/interface.py`: stable `observe` / `execute` contract.
-- `robot/http_adapter.py`: edge → robot HTTP client.
-- `robot/http_server.py`: small server template for Ryan/Sarah's backend.
-- `robot/bracketbot.py`: confirmed, read-only BBOS observations and unfinished integration seams.
+- Daniel → edge: ordinary HTTP `POST /v1/jobs`.
+- Edge → robot: ordinary HTTP `POST /v1/actions` and `GET /v1/observation`.
+- SSE remains useful for browser status display, but it is not needed in the physical command path.
+- Camera and high-rate telemetry are out of the caretaker MVP path.
 
-Planner, diff, verification, and orchestration know neither Daniel's wire schema nor BBOS.
+This can run across three laptops/hosts on the same LAN. AWS cannot normally initiate a connection to a private laptop or robot. If Daniel deploys the command producer to AWS, either keep a small LAN-side Daniel process or later add outbound edge polling; do not add a public tunnel to the physical control loop unless the team accepts that risk.
 
-## Data path
+## Safety properties
 
-Daniel's current `/api/state` object pose is normalized as:
+- Unsupported or malformed jobs never reach `RobotAdapter`.
+- One lock serializes physical jobs.
+- A completed `job_id` is not executed twice while the edge process remains alive.
+- A robot API timeout is treated as ambiguous failure, not blindly retried.
+- The edge does not transform axes or units implicitly.
 
-```json
-{
-  "object_id": "mug_a1b2",
-  "position": {"x": 0.42, "y": 0.18, "z": 0.76},
-  "orientation": {"yaw": 15.0},
-  "metadata": {
-    "coordinate_frame": "canonical_world_z_up",
-    "position_unit": "m",
-    "yaw_unit": "deg"
-  }
-}
-```
+Durable idempotency, authentication policy, cancellation, and restart reconciliation remain Daniel-contract work.
 
-Daniel's confirmed canonical frame is +X forward from the anchor, +Y left, +Z up. Robot code must explicitly transform this to its required frame; the edge never swaps axes or units implicitly.
+## Legacy GitIRL modules
 
-A confirmed Daniel job `moved` op becomes one `MOVE_OBJECT` with source and target `ObjectState`. Other operation types remain unsupported/conflicts until robot behavior exists.
-
-## Why HTTP + SSE
-
-- HTTP is request/response, easy to inspect with `curl`, naturally handles terminal action results, and avoids connection state.
-- SSE is appropriate only for Daniel→edge notifications: ordered text events, built-in event IDs, simple reconnect/replay.
-- Robot actions remain HTTP because they need explicit acknowledgement, timeout, and terminal result.
-- Camera frames remain ordinary HTTP POSTs if the team keeps this path; video/media should not be put on SSE.
-
-Daniel's current SSE `job` event is only a summary and does not contain executable `ops`. No robot action can safely be triggered from it yet. Daniel must include the full job or provide a `GET job by id` endpoint plus an authenticated result endpoint.
-
-## Confirmed robot facts
-
-BBOS is local shared-memory IPC. Confirmed read topics include the head/left/right JPEG streams, camera status, and arm state. Control/torque topics are single-writer and are not opened here.
-
-Sarah's current `precision_placement.py` is a local CLI for saved joint-pose replay. It has no JSON object-command/result contract and is not called by the edge.
-
-## Keep simple
-
-| Area | Decision |
-| --- | --- |
-| state/diff/planner/orchestration | Keep for mocks, deterministic restore, and verification. |
-| protocol/transport | Keep small; this is the cloud isolation seam. |
-| RobotAdapter | Keep; direct or HTTP implementations can change without changing core types. |
-| deterministic NLP | Keep as local fallback only. |
-| camera streaming | Deferred; do not expand tonight. |
-| agent frameworks/LLMs/vector DBs | Cloud-owned or out of scope here. |
+The deterministic GitIRL parser, state store, diff planner, and restore orchestrator remain available for tests or a later “save this setup / restore this setup” feature. They are not on the caretaker MVP critical path and should not be expanded tonight.
