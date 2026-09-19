@@ -187,3 +187,105 @@ never fabricated.
 **If you need a capability these two do not cover, ask for the endpoint, not the key.** Adding an
 endpoint takes minutes and keeps your edge dependency-free — which is worth protecting, since your
 `requirements.txt` currently reads *"No runtime dependencies."*
+
+---
+
+## 8. Connecting — you only ever dial us
+
+**The link is one-way. Your edge makes outbound HTTPS calls to the cloud; the cloud never calls
+you.** Verified in our source: the only inbound path we ever had was `WS /ws/gitirl-agent`, which
+*you* dialled, and you retired it at `b4f3e07`. Nothing on our side initiates a connection to your
+machine.
+
+That means:
+
+- **No Tailscale, no VPN, no port-forwarding, no public IP on your end.** Nothing to install.
+- Anything that can make an HTTPS request can be the edge — your laptop, the Pi, a container.
+- Your firewall stays shut. You need outbound 443 and nothing else.
+
+### Heads-up: you deleted your cloud client
+
+`9582081` removed `transport/daniel_api.py` and `transport/sse.py`. `protocol/daniel.py` still has
+the translators (`world_state_from_daniel`, `robot_actions_from_daniel_job`,
+`point_action_from_daniel_job`) — those are pure functions and still correct — but **there is no
+HTTP transport left in the repo**. Your only remaining `urllib` use is `robot/http_adapter.py`,
+which talks to the robot, not to us.
+
+So you need a client again. Here is a complete one, standard library only, to keep
+`requirements.txt` at *"No runtime dependencies"*:
+
+```python
+# src/gitirl_agent/transport/cloud.py
+import json, os, urllib.request, urllib.parse
+
+class Cloud:
+    def __init__(self):
+        self.base = os.environ["GITIRL_CLOUD_BASE_URL"].rstrip("/")
+        self.token = os.environ.get("GITIRL_CLOUD_TOKEN")
+
+    def _call(self, method, path, body=None, auth=False):
+        headers = {"Content-Type": "application/json"}
+        if auth and self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        req = urllib.request.Request(
+            self.base + path, method=method, headers=headers,
+            data=json.dumps(body).encode() if body is not None else None)
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.load(r)
+
+    def state(self, ref="HEAD"):                      # no token
+        return self._call("GET", "/api/state?" + urllib.parse.urlencode({"ref": ref}))
+
+    def plan(self, command, args):                    # no token
+        return self._call("POST", "/api/command", {"command": command, "args": args})
+
+    def job(self, job_id):                            # no token
+        return self._call("GET", f"/api/jobs/{job_id}")
+
+    def report(self, job_id, body):                   # TOKEN REQUIRED
+        return self._call("POST", f"/api/jobs/{job_id}/result", body, auth=True)
+
+    def search(self, q, limit=20):                    # no token — hybrid vector search
+        return self._call("GET", "/api/search?" + urllib.parse.urlencode({"q": q, "limit": limit}))
+```
+
+### Your `.env`
+
+```
+GITIRL_CLOUD_BASE_URL=https://daniels-macbook-pro.tailaa0f4f.ts.net
+GITIRL_CLOUD_TOKEN=<43 chars — Daniel sends this privately, NEVER commit it>
+```
+
+Fallback base URL if the first does not resolve for you:
+`https://bench-combination-zero-dominant.trycloudflare.com` — **this one changes whenever the
+tunnel restarts**, so treat it as temporary and tell us if you end up relying on it.
+
+### Smoke test, in order — stop at the first failure
+
+```bash
+BASE=https://daniels-macbook-pro.tailaa0f4f.ts.net
+
+curl -s $BASE/api/health                      # 200
+curl -s "$BASE/api/state?ref=HEAD"            # sha + objects + frame + units
+curl -s "$BASE/api/search?q=something%20to%20write%20with"   # marker first
+
+JOB=$(curl -s -X POST $BASE/api/command -H 'Content-Type: application/json' \
+      -d '{"command":"checkout","args":{"ref":"b3691ea"}}' | python3 -c 'import json,sys;print(json.load(sys.stdin)["job_id"])')
+
+curl -s $BASE/api/jobs/$JOB                   # state, motion, ops
+curl -s -X POST $BASE/api/jobs/$JOB/result -H 'Content-Type: application/json' \
+     -d '{"run_id":"smoke","status":"failed","ops":[]}'      # 401 without the token
+```
+
+The last one returning **401 is the correct result** without the header — that is the write being
+authenticated, not a misconfiguration. Add `-H "Authorization: Bearer $GITIRL_CLOUD_TOKEN"` and it
+is accepted.
+
+Use `checkout` for the smoke test, not `revert`: `revert` is plan-only (§4) and `restore` is
+currently refused by `/api/command` — we are fixing that.
+
+### What has to be true on our side
+
+The cloud runs on Daniel's laptop behind a tunnel. So during a demo it must be **awake, on, and
+tunnelled**. If every call fails at once it is almost certainly that, not your code — ping Daniel
+rather than debugging. `GET /api/health` is the cheapest way to tell.
