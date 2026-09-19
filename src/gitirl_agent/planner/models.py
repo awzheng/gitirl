@@ -15,9 +15,28 @@ class ActionType(str, Enum):
     PICK_OBJECT = "PICK_OBJECT"
     PLACE_OBJECT = "PLACE_OBJECT"
     POINT_AT_OBJECT = "POINT_AT_OBJECT"
+    NAVIGATE_TO_POSE = "NAVIGATE_TO_POSE"
     VERIFY_OBJECT = "VERIFY_OBJECT"
     WAIT = "WAIT"
     NO_OP = "NO_OP"
+
+
+@dataclass(frozen=True)
+class NavigationTarget:
+    """A planar goal in the robot's persistent SLAM world frame.
+
+    This is deliberately separate from an object's 3D pose. Converting a
+    cloud/world position into this frame is a calibrated, deterministic step;
+    it must not be inferred by an LLM or by the navigation backend.
+    """
+
+    x: float
+    y: float
+    yaw_rad: float
+    map_revision: str
+    frame: str = "slam_world"
+    tolerance_m: float = 0.35
+    timeout_s: float = 120.0
 
 
 @dataclass(frozen=True)
@@ -27,6 +46,7 @@ class RobotAction:
     object_id: Optional[str] = None
     source: Optional[ObjectState] = None
     target: Optional[ObjectState] = None
+    navigation_target: Optional[NavigationTarget] = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -34,6 +54,7 @@ class ActionStatus(str, Enum):
     SUCCESS = "success"
     FAILED = "failed"
     RETRYABLE = "retryable"
+    UNKNOWN = "unknown"
 
 
 @dataclass(frozen=True)
@@ -53,3 +74,7 @@ class ActionResult:
     @property
     def retryable(self) -> bool:
         return self.status is ActionStatus.RETRYABLE
+
+    @property
+    def unknown(self) -> bool:
+        return self.status is ActionStatus.UNKNOWN

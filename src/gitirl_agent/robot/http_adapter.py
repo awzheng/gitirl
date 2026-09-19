@@ -86,9 +86,24 @@ class HTTPRobotAdapter:
             # Delivery may be ambiguous after a timeout. Never label it retryable:
             # orchestration must re-observe before deciding whether to act again.
             return ActionResult(
-                ActionStatus.FAILED,
+                ActionStatus.UNKNOWN,
                 f"robot API failed; delivery status may be unknown: {error}",
             )
+
+    def cancel(self, request_id: str) -> ActionResult:
+        """Request cancellation; the execution call still carries final status."""
+        if not request_id:
+            raise ValueError("request_id must be non-empty")
+        path_id = urllib.parse.quote(request_id, safe="")
+        try:
+            value = self._request("POST", f"/v1/actions/{path_id}/cancel")
+            envelope = require_envelope(value, request_id)
+            result = envelope.get("result")
+            if not isinstance(result, dict):
+                raise RobotContractError("response requires result")
+            return action_result_from_dict(result)
+        except (RobotAPIError, RobotContractError, ValueError) as error:
+            return ActionResult(ActionStatus.UNKNOWN, f"cancellation status unknown: {error}")
 
     def _request(
         self,

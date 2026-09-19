@@ -4,7 +4,7 @@ import unittest
 import urllib.error
 from unittest.mock import patch
 
-from src.gitirl_agent.planner.models import ActionType, RobotAction
+from src.gitirl_agent.planner.models import ActionStatus, ActionType, NavigationTarget, RobotAction
 from src.gitirl_agent.robot.http_adapter import HTTPRobotAdapter
 from src.gitirl_agent.robot.http_contract import (
     action_response,
@@ -90,7 +90,7 @@ class RobotHTTPTests(unittest.TestCase):
         ):
             result = client.execute(action)
 
-        self.assertTrue(result.failed)
+        self.assertIs(result.status, ActionStatus.UNKNOWN)
         self.assertFalse(result.retryable)
         self.assertIn("busy", result.message)
 
@@ -118,6 +118,22 @@ class RobotHTTPTests(unittest.TestCase):
             action_result_from_dict(action_result_to_dict(result)), result
         )
 
+    def test_navigation_contract_round_trip(self):
+        action = RobotAction(
+            action_type=ActionType.NAVIGATE_TO_POSE,
+            request_id="nav-1",
+            navigation_target=NavigationTarget(
+                frame="slam_world",
+                x=1.25,
+                y=-0.5,
+                yaw_rad=1.2,
+                map_revision="map-2026-09-19",
+                tolerance_m=0.3,
+                timeout_s=90,
+            ),
+        )
+
+        self.assertEqual(robot_action_from_dict(robot_action_to_dict(action)), action)
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,7 +6,7 @@ import json
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Mapping, Optional, Protocol
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from src.gitirl_agent.planner.models import ActionResult, RobotAction
 from src.gitirl_agent.robot.http_contract import (
@@ -32,6 +32,9 @@ class RobotAPIBackend(Protocol):
 
     def execute(self, action: RobotAction) -> ActionResult:
         """Return only after terminal success, failure, or retryable failure."""
+
+    def cancel(self, request_id: str) -> ActionResult:
+        """Signal cancellation of an active request when supported."""
 
 
 class RobotHTTPServer:
@@ -95,7 +98,33 @@ def _handler_for(backend: RobotAPIBackend, token: Optional[str]):
         def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
             if not self._authorized(token):
                 return
-            if urlparse(self.path).path != "/v1/actions":
+            path = urlparse(self.path).path
+            if path.startswith("/v1/actions/") and path.endswith("/cancel"):
+                request_id = unquote(
+                    path[len("/v1/actions/") : -len("/cancel")].strip("/")
+                )
+                if not request_id:
+                    self._send(
+                        HTTPStatus.UNPROCESSABLE_ENTITY,
+                        error_document("bad_request", "request_id is required"),
+                    )
+                    return
+                cancel = getattr(backend, "cancel", None)
+                if cancel is None:
+                    self._send(
+                        HTTPStatus.NOT_IMPLEMENTED,
+                        error_document("unsupported", "backend does not support cancellation"),
+                    )
+                    return
+                try:
+                    self._send(HTTPStatus.OK, action_response(request_id, cancel(request_id)))
+                except Exception as error:
+                    self._send(
+                        HTTPStatus.SERVICE_UNAVAILABLE,
+                        error_document("cancellation_failed", str(error), retryable=False),
+                    )
+                return
+            if path != "/v1/actions":
                 self._send(HTTPStatus.NOT_FOUND, error_document("not_found", "unknown endpoint"))
                 return
             try:

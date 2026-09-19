@@ -8,6 +8,7 @@ from src.gitirl_agent.planner.models import (
     ActionResult,
     ActionStatus,
     ActionType,
+    NavigationTarget,
     RobotAction,
 )
 from src.gitirl_agent.state.models import ObjectState, WorldState
@@ -31,6 +32,7 @@ def robot_action_to_dict(action: RobotAction) -> Dict[str, Any]:
         "object_id": action.object_id,
         "source": _object_to_dict(action.source),
         "target": _object_to_dict(action.target),
+        "navigation_target": _navigation_target_to_dict(action.navigation_target),
         "metadata": dict(action.metadata),
     }
 
@@ -52,6 +54,7 @@ def robot_action_from_dict(value: Mapping[str, Any]) -> RobotAction:
         object_id=object_id,
         source=_object_from_value(value.get("source")),
         target=_object_from_value(value.get("target")),
+        navigation_target=_navigation_target_from_value(value.get("navigation_target")),
         metadata=_mapping(value.get("metadata")),
     )
 
@@ -151,3 +154,55 @@ def _mapping(value: Any) -> Mapping[str, Any]:
     if not isinstance(value, dict):
         raise RobotContractError("metadata must be an object")
     return value
+
+
+def _navigation_target_to_dict(
+    value: Optional[NavigationTarget],
+) -> Optional[Dict[str, Any]]:
+    if value is None:
+        return None
+    return {
+        "frame": value.frame,
+        "x": value.x,
+        "y": value.y,
+        "yaw_rad": value.yaw_rad,
+        "map_revision": value.map_revision,
+        "tolerance_m": value.tolerance_m,
+        "timeout_s": value.timeout_s,
+    }
+
+
+def _navigation_target_from_value(value: Any) -> Optional[NavigationTarget]:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise RobotContractError("navigation_target must be an object")
+    required = ("frame", "x", "y", "yaw_rad", "map_revision")
+    missing = [field for field in required if field not in value]
+    if missing:
+        raise RobotContractError(
+            "navigation_target is missing " + ", ".join(missing)
+        )
+    frame = value["frame"]
+    map_revision = value["map_revision"]
+    if not isinstance(frame, str) or not frame:
+        raise RobotContractError("navigation_target frame must be a non-empty string")
+    if not isinstance(map_revision, str) or not map_revision:
+        raise RobotContractError(
+            "navigation_target map_revision must be a non-empty string"
+        )
+    numeric = {}
+    for field in ("x", "y", "yaw_rad", "tolerance_m", "timeout_s"):
+        raw = value.get(field, 0.35 if field == "tolerance_m" else 120.0)
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+            raise RobotContractError(f"navigation_target {field} must be numeric")
+        numeric[field] = float(raw)
+    return NavigationTarget(
+        frame=frame,
+        x=numeric["x"],
+        y=numeric["y"],
+        yaw_rad=numeric["yaw_rad"],
+        map_revision=map_revision,
+        tolerance_m=numeric["tolerance_m"],
+        timeout_s=numeric["timeout_s"],
+    )
