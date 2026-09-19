@@ -10,9 +10,15 @@ from src.gitirl_agent.protocol.daniel import (
 
 
 class DanielContractTests(unittest.TestCase):
+    contract = {
+        "frame": "world_z_up",
+        "units": {"position": "m", "yaw": "deg", "duration": "s"},
+    }
+
     def test_state_normalizes_cloud_pose_without_axis_guessing(self):
         state = world_state_from_daniel(
             {
+                **self.contract,
                 "sha": "abc123",
                 "objects": [
                     {
@@ -28,11 +34,13 @@ class DanielContractTests(unittest.TestCase):
         mug = state.objects[0]
         self.assertEqual(mug.position, {"x": 0.42, "y": 0.18, "z": 0.76})
         self.assertEqual(mug.orientation, {"yaw": 15.0})
-        self.assertEqual(mug.metadata["coordinate_frame"], "canonical_world_z_up")
+        self.assertEqual(state.metadata["coordinate_frame"], "world_z_up")
+        self.assertEqual(mug.metadata["coordinate_frame"], "world_z_up")
 
     def test_moved_op_becomes_one_high_level_action(self):
         translated = robot_actions_from_daniel_job(
             {
+                **self.contract,
                 "job_id": "job_9a2f",
                 "target": "deadbeef",
                 "ops": [
@@ -57,6 +65,7 @@ class DanielContractTests(unittest.TestCase):
     def test_unsupported_and_malformed_ops_never_become_actions(self):
         translated = robot_actions_from_daniel_job(
             {
+                **self.contract,
                 "job_id": "job_1",
                 "ops": [
                     {"op": "added", "object_id": "cup_1", "to": {}},
@@ -75,12 +84,18 @@ class DanielContractTests(unittest.TestCase):
     def test_state_requires_complete_pose(self):
         with self.assertRaises(DanielContractError):
             world_state_from_daniel(
-                {"objects": [{"object_id": "box_A", "pose": {"x": 1, "y": 2}}]}
+                {
+                    **self.contract,
+                    "objects": [
+                        {"object_id": "box_A", "pose": {"x": 1, "y": 2}}
+                    ],
+                }
             )
 
     def test_point_job_becomes_point_action(self):
         action = point_action_from_daniel_job(
             {
+                **self.contract,
                 "job_id": "job_point",
                 "command": "point",
                 "object_id": "keys_7c2e",
@@ -90,6 +105,23 @@ class DanielContractTests(unittest.TestCase):
         )
         self.assertEqual(action.action_type, ActionType.POINT_AT_OBJECT)
         self.assertEqual(action.target.position["z"], 0.9)
+
+    def test_unknown_coordinate_frame_is_rejected(self):
+        with self.assertRaisesRegex(DanielContractError, "frame"):
+            world_state_from_daniel(
+                {**self.contract, "frame": "camera", "objects": []}
+            )
+
+    def test_unknown_units_are_rejected(self):
+        with self.assertRaisesRegex(DanielContractError, "units.position"):
+            robot_actions_from_daniel_job(
+                {
+                    **self.contract,
+                    "units": {"position": "cm", "yaw": "deg", "duration": "s"},
+                    "job_id": "job_bad_units",
+                    "ops": [],
+                }
+            )
 
 
 if __name__ == "__main__":

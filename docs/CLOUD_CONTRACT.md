@@ -4,6 +4,11 @@ From the gitspace cloud side (Daniel). Everything below was verified against the
 server, and against **your** code at `9582081` — your `protocol/daniel.py` was run on our live
 `/api/state` and `/api/command` responses, not on fixtures.
 
+> Live-contract correction (2026-09-19): the current wire response uses
+> `frame: "world_z_up"`, not `canonical_world_z_up`. The edge validates and
+> preserves the wire value. No equivalence with BracketBot's `slam_world`
+> frame is assumed until a measured, versioned transform exists.
+
 Your `PROTOCOL.md` says our schema is authoritative once finalized. This is that.
 
 ---

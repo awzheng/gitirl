@@ -1,11 +1,17 @@
 import unittest
 
 from src.gitirl_agent.caretaker.service import CaretakerJobError, CaretakerService
+from src.gitirl_agent.planner.models import ActionResult, ActionStatus
 from src.gitirl_agent.robot.mock import MockRobotAdapter
 from src.gitirl_agent.state.models import ObjectState, WorldState
 
 
 class CaretakerServiceTests(unittest.TestCase):
+    contract = {
+        "frame": "world_z_up",
+        "units": {"position": "m", "yaw": "deg", "duration": "s"},
+    }
+
     def setUp(self):
         self.robot = MockRobotAdapter(
             WorldState(objects=(ObjectState("box_A", label="box", position="Y"),))
@@ -15,6 +21,7 @@ class CaretakerServiceTests(unittest.TestCase):
     def test_executes_daniel_point_job(self):
         result = self.service.execute(
             {
+                **self.contract,
                 "job_id": "job_point",
                 "command": "point",
                 "object_id": "keys_7c2e",
@@ -27,6 +34,7 @@ class CaretakerServiceTests(unittest.TestCase):
 
     def test_duplicate_job_is_not_executed_twice(self):
         job = {
+            **self.contract,
             "job_id": "job_move",
             "command": "move",
             "ops": [
@@ -48,6 +56,7 @@ class CaretakerServiceTests(unittest.TestCase):
         with self.assertRaises(CaretakerJobError):
             self.service.execute(
                 {
+                    **self.contract,
                     "job_id": "job_bad",
                     "command": "dance",
                     "ops": [{"op": "added", "object_id": "box_A"}],
@@ -65,12 +74,30 @@ class CaretakerServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(CaretakerJobError, "exactly one"):
             self.service.execute(
                 {
+                    **self.contract,
                     "job_id": "job_many",
                     "command": "move",
                     "ops": [operation, {**operation, "object_id": "box_B"}],
                 }
             )
         self.assertEqual(self.robot.execute_calls, 0)
+
+    def test_unknown_robot_completion_fails_closed(self):
+        class UnknownRobot:
+            def execute(self, action):
+                return ActionResult(ActionStatus.UNKNOWN, "completion not confirmed")
+
+        result = CaretakerService(UnknownRobot()).execute(
+            {
+                **self.contract,
+                "job_id": "job_unknown",
+                "command": "point",
+                "object_id": "keys_7c2e",
+                "target_pose": {"x": 0.8, "y": 0.3, "z": 0.9},
+            }
+        )
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.message, "completion not confirmed")
 
 
 if __name__ == "__main__":

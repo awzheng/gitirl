@@ -1,29 +1,37 @@
 # Caretaker integration
 
-## Daniel → edge
+## Edge → Daniel cloud
 
-Daniel's current useful endpoints are:
+The cloud link is outbound-only HTTPS. Do not set `HOUSEBOT_EDGE_URL`, expose
+port `8780`, or add a tunnel for this path. Configure:
 
-- `GET /api/search?q=...`
-- `GET /api/object-life/{object_id}`
-- `POST /api/object-life/{object_id}/point`
-
-The point endpoint already returns `job_id`, `object_id`, `target_pose`, and `zone`. Daniel should forward that complete response to:
-
-```http
-POST http://ANDREW_IP:8780/v1/jobs
-Authorization: Bearer <HOUSEBOT_EDGE_TOKEN>
+```bash
+GITIRL_CLOUD_BASE_URL=https://daniels-macbook-pro.tailaa0f4f.ts.net
+GITIRL_CLOUD_TOKEN=<Daniel provides this privately>
+GITIRL_CLOUD_TIMEOUT_SECONDS=30
 ```
 
-Do not use Daniel's SSE job summary for execution: it omits the target pose/operations.
+`CloudAPIClient` in `transport/cloud.py` supports state, semantic search,
+explicit command planning, job reads, and authenticated terminal reports. The
+token is sent only by `report()`; reads and command planning follow Daniel's
+current unauthenticated contract. Missing report credentials fail locally
+before a request is made.
 
-Still needed from Daniel:
+Job discovery is not implemented. A read-only live probe of `GET /api/events`
+returned only a `status` event, with no complete job, job ID, claim, or replay
+contract. Calling `discover_jobs()` therefore raises
+`CloudJobDiscoveryUnavailable`. Daniel must either define job delivery over
+that outbound stream or add a read/claim queue; the edge must not poll guessed
+IDs or enable the cloud-to-edge dispatcher as a workaround.
 
-- one real point-job fixture;
-- one result callback endpoint, or acceptance of the synchronous edge response;
-- stable `job_id` semantics;
-- confirmation that object poses are canonical world Z-up/metres/yaw-degrees;
-- an agreed confidence/ambiguity gate.
+Live payloads identify their frame as `world_z_up`. The edge preserves that
+label; it does not assume those coordinates are already in BracketBot's
+`slam_world` frame. A measured, versioned cloud-to-SLAM transform is required
+before any cloud pose can become a navigation target.
+
+Safe smoke checks are documented in `CLOUD_CONTRACT.md`. The temporary
+Cloudflare hostname recorded there did not resolve on 2026-09-19; use the
+primary Tailscale HTTPS name unless Daniel publishes a new fallback.
 
 ## Edge → robot
 

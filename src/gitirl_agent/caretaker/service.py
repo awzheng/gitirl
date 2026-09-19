@@ -68,10 +68,14 @@ class CaretakerService:
                 "status": result.status.value,
                 "message": result.message,
             }
-            status = "succeeded"
-            if result.status is ActionStatus.RETRYABLE:
+            if result.status is ActionStatus.SUCCESS:
+                status = "succeeded"
+            elif result.status is ActionStatus.RETRYABLE:
                 status = "retryable_failure"
-            elif result.status is ActionStatus.FAILED:
+            else:
+                # Daniel's current contract accepts only succeeded, failed, or
+                # retryable_failure. Unknown/ambiguous completion must fail
+                # closed so cloud state never records an unverified success.
                 status = "failed"
             completed = CaretakerJobResult(
                 job_id,

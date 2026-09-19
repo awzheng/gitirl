@@ -15,8 +15,17 @@ from src.gitirl_agent.planner.models import ActionType, RobotAction
 from src.gitirl_agent.state.models import ObjectState, WorldState
 
 
-DANIEL_POSE_METADATA = {
-    "coordinate_frame": "canonical_world_z_up",
+DANIEL_FRAME = "world_z_up"
+DANIEL_UNITS = {
+    "position": "m",
+    "yaw": "deg",
+    "duration": "s",
+}
+
+# Preserve Daniel's source frame until a measured cloud-to-robot transform is
+# applied. Relabeling these coordinates as SLAM/native would be unsafe.
+CLOUD_POSE_METADATA = {
+    "coordinate_frame": DANIEL_FRAME,
     "position_unit": "m",
     "yaw_unit": "deg",
 }
@@ -47,6 +56,7 @@ def world_state_from_daniel(document: Mapping[str, Any]) -> WorldState:
     required world-to-robot transform; the edge never relabels axes implicitly.
     """
 
+    _require_contract(document)
     raw_objects = document.get("objects")
     if not isinstance(raw_objects, list):
         raise DanielContractError("cloud state requires an objects list")
@@ -60,7 +70,9 @@ def world_state_from_daniel(document: Mapping[str, Any]) -> WorldState:
         metadata={
             "source": "daniel_api_state",
             "commit_sha": sha,
-            **DANIEL_POSE_METADATA,
+            "coordinate_frame": DANIEL_FRAME,
+            "position_unit": DANIEL_UNITS["position"],
+            "yaw_unit": DANIEL_UNITS["yaw"],
         },
     )
 
@@ -76,6 +88,7 @@ def robot_actions_from_daniel_job(
     and never reach robot execution.
     """
 
+    _require_contract(document)
     raw_ops = document.get("ops")
     if not isinstance(raw_ops, list):
         raise DanielContractError("cloud job requires an ops list")
@@ -128,7 +141,7 @@ def robot_actions_from_daniel_job(
                     "source": "daniel_api_command",
                     "job_id": job_id,
                     "target_commit": document.get("target"),
-                    **DANIEL_POSE_METADATA,
+                    **CLOUD_POSE_METADATA,
                 },
             )
         )
@@ -139,6 +152,7 @@ def robot_actions_from_daniel_job(
 def point_action_from_daniel_job(document: Mapping[str, Any]) -> RobotAction:
     """Normalize Daniel's current ``/api/object-life/{id}/point`` job."""
 
+    _require_contract(document)
     job_id = document.get("job_id")
     object_id = document.get("object_id")
     if not isinstance(job_id, str) or not job_id:
@@ -152,7 +166,7 @@ def point_action_from_daniel_job(document: Mapping[str, Any]) -> RobotAction:
         object_id=object_id,
         position=position,
         orientation=orientation,
-        metadata={"zone": document.get("zone"), **DANIEL_POSE_METADATA},
+        metadata={"zone": document.get("zone"), **CLOUD_POSE_METADATA},
     )
     return RobotAction(
         action_type=ActionType.POINT_AT_OBJECT,
@@ -163,7 +177,7 @@ def point_action_from_daniel_job(document: Mapping[str, Any]) -> RobotAction:
             "source": "daniel_object_point",
             "job_id": job_id,
             "pointing_at": document.get("pointing_at"),
-            **DANIEL_POSE_METADATA,
+            **CLOUD_POSE_METADATA,
         },
     )
 
@@ -185,7 +199,7 @@ def _state_object(value: Any, sha: Optional[str]) -> ObjectState:
             "color": value.get("color"),
             "extents": value.get("extents"),
             "commit_sha": sha,
-            **DANIEL_POSE_METADATA,
+            **CLOUD_POSE_METADATA,
         },
     )
 
@@ -201,9 +215,25 @@ def _operation_object(
         orientation=orientation,
         metadata={
             "zone": operation.get("zone"),
-            **DANIEL_POSE_METADATA,
+            **CLOUD_POSE_METADATA,
         },
     )
+
+
+def _require_contract(document: Mapping[str, Any]) -> None:
+    """Reject coordinate data whose meaning is not the confirmed contract."""
+
+    frame = document.get("frame")
+    if frame != DANIEL_FRAME:
+        raise DanielContractError(f"cloud document frame must be {DANIEL_FRAME}")
+    units = document.get("units")
+    if not isinstance(units, Mapping):
+        raise DanielContractError("cloud document requires units")
+    for quantity, expected in DANIEL_UNITS.items():
+        if units.get(quantity) != expected:
+            raise DanielContractError(
+                f"cloud document units.{quantity} must be {expected}"
+            )
 
 
 def _pose(value: Any, field: str) -> tuple[Mapping[str, float], Mapping[str, float]]:
