@@ -1,2 +1,1 @@
-# Optional: required only when GITIRL_WS_URL is set.
-websockets>=12,<16
+# No runtime dependencies. Robot HTTP and cloud HTTP/SSE use the standard library.

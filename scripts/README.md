@@ -1,24 +1,19 @@
 # scripts/
 
-Purpose: small development and integration utilities for `gitirl-agent`.
+Small development/integration utilities. Core logic stays in `src/`.
 
-| File | Purpose | Inputs | Outputs | Environment |
+| File | Purpose | Inputs | Outputs | Env vars |
 | --- | --- | --- | --- | --- |
-| `run_dev.py` | Run mock edge flow via CLI, JSONL, or provisional WebSocket | CLI text, JSONL envelopes, or WebSocket messages | Parsed-command and command-result envelopes | `GITIRL_WS_URL`, `GITIRL_WS_TOKEN`, `GITIRL_STATE_FILE` |
-| `stream_cameras.py` | Deferred three-camera transport experiment; no real capture | Three length-prefixed byte streams | Provisional binary WebSocket frames | `GITIRL_CAMERA_WS_URL`, `GITIRL_CAMERA_WS_TOKEN` |
+| `run_dev.py` | Mock CLI or JSONL edge flow | text / JSONL | JSON envelopes | `GITIRL_STATE_FILE`, `GITIRL_ROBOT_*` |
+| `listen_cloud.py` | Read Daniel SSE events; no robot execution | `/api/events` | JSONL events | `GITIRL_CLOUD_BASE_URL`, `GITIRL_CLOUD_TOKEN` |
+| `run_robot_api.py` | Mock robot HTTP API | HTTP | observation/result JSON | `GITIRL_ROBOT_TOKEN` |
+| `inspect_bracketbot.py` | Read-only BBOS smoke test | BBOS topics | JSON summary | `PYTHONPATH` |
+| `stream_cameras.py` | Deferred HTTP frame sender | BBOS or framed files | HTTP POST bodies | `GITIRL_CAMERA_HTTP_*` |
 
 Rules:
 
-- No core application logic in scripts; call `src/gitirl_agent/`.
-- Never include credentials.
-- Never assume BracketBot APIs or behavior.
-- Never duplicate Daniel's cloud infrastructure.
-- Keep camera streaming deferred until ownership and contracts are confirmed.
-- Update this file whenever scripts change.
+- No core logic, credentials, cloud infrastructure, or invented robot behavior.
+- Scripts call `src/`; do not duplicate contracts.
+- Update this table when scripts change.
 
-Before changing integration code, read:
-
-- `README.md`
-- `docs/ARCHITECTURE.md`
-- `docs/INTEGRATION.md`
-- `docs/PROTOCOL.md`
+Read `README.md`, `docs/ARCHITECTURE.md`, `docs/INTEGRATION.md`, and `docs/PROTOCOL.md` before changing integration code.

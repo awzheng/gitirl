@@ -1,8 +1,8 @@
-# Provisional platform protocol
+# Local development protocol
 
-These schemas are development defaults. They exist so Andrew can test independently before the central backend contract is finalized.
+These envelopes are for CLI/JSONL development. They are not Daniel's HTTP/SSE contract.
 
-> **Daniel's backend schema is authoritative once finalized. Modify the protocol adapter rather than spreading backend-specific assumptions throughout gitirl-agent.**
+> **Daniel's backend schema is authoritative. Adapt `protocol/daniel.py` and `transport/daniel_api.py` rather than spreading backend-specific assumptions throughout gitirl-agent.**
 
 ## Envelope
 
@@ -43,7 +43,7 @@ Provisional payload: an `observation` containing `objects` and optional state me
 
 Provisional payload: `result` with `status`, optional `message`, and optional `observations`.
 
-The three robot-originated events are modeled but not wired into the local synchronous adapter flow. Their routing depends on the final service split.
+The three robot-originated events are modeled for fixtures but are not a network transport. Real robot calls use the `RobotAdapter` HTTP boundary.
 
 ## Outgoing events
 
@@ -120,4 +120,4 @@ The sender creates a non-empty request ID. All parsed commands, actions, statuse
 
 ## Versioning
 
-No protocol version is claimed yet. Once Daniel finalizes the contract, add an explicit version or negotiated compatibility rule if the backend requires one.
+No cloud protocol version is claimed here. Daniel's current HTTP shapes are translated in one module and should gain an explicit version when his backend contract stabilizes.

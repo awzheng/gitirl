@@ -1,15 +1,16 @@
-"""Provisional binary camera-frame contract and WebSocket sender."""
+"""Provisional camera-frame contract and HTTP sender."""
 
 from __future__ import annotations
 
 import asyncio
-import inspect
+import importlib
 import json
 import struct
+import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, Mapping, Optional, Protocol
+from typing import Any, AsyncIterator, Mapping, Optional, Protocol
 from uuid import uuid4
 
 
@@ -23,7 +24,7 @@ MAX_FRAME_BYTES = 32 * 1024 * 1024
 @dataclass(frozen=True)
 class CameraFrame:
     camera_id: str
-    mount_angle_degrees: float
+    mount_angle_degrees: Optional[float]
     sequence: int
     captured_at: str
     data: bytes
@@ -98,8 +99,60 @@ class LengthPrefixedFrameSource:
             await asyncio.to_thread(stream.close)
 
 
+class BBOSJPEGFrameSource:
+    """Read one confirmed BracketBot JPEG topic without controlling hardware."""
+
+    def __init__(
+        self,
+        camera_id: str,
+        topic: str,
+        mount_angle_degrees: Optional[float] = None,
+        poll_interval_seconds: float = 0.01,
+        reader_factory: Any = None,
+    ) -> None:
+        self.camera_id = camera_id
+        self.topic = topic
+        self.mount_angle_degrees = mount_angle_degrees
+        self.poll_interval_seconds = poll_interval_seconds
+        self._reader_factory = reader_factory
+
+    async def frames(self) -> AsyncIterator[CameraFrame]:
+        factory = self._reader_factory
+        if factory is None:
+            try:
+                factory = importlib.import_module("bbos").Reader
+            except (ImportError, AttributeError) as error:
+                raise RuntimeError(
+                    "BBOS is unavailable; run --bbos on the BracketBot host with "
+                    "/home/bracketbot/bbos on PYTHONPATH"
+                ) from error
+
+        reader = factory(self.topic, keeptime=False).__enter__()
+        sequence = 0
+        try:
+            while True:
+                if not reader.ready():
+                    await asyncio.sleep(self.poll_interval_seconds)
+                    continue
+                record = reader.data
+                size = int(record["jpeg_len"])
+                payload = bytes(record["jpeg"][:size])
+                yield CameraFrame(
+                    camera_id=self.camera_id,
+                    mount_angle_degrees=self.mount_angle_degrees,
+                    sequence=sequence,
+                    captured_at=str(record["timestamp"]),
+                    data=payload,
+                    encoding="jpeg",
+                    metadata={"bbos_topic": self.topic},
+                )
+                sequence += 1
+        finally:
+            reader.__exit__(None, None, None)
+
+
 def encode_camera_frame(frame: CameraFrame, stream_id: str) -> bytes:
-    """Encode one provisional binary WebSocket message."""
+    """Encode one provisional self-describing binary HTTP body."""
 
     header = {
         "type": "camera_frame",
@@ -157,67 +210,35 @@ def decode_camera_frame(message: bytes) -> tuple:
     return header, payload
 
 
-class CameraWebSocketSender:
-    """Binary WebSocket sender with bounded reconnect attempts."""
+class CameraHTTPSender:
+    """POST self-contained frames to an HTTP API; no persistent socket."""
 
     def __init__(
         self,
         url: str,
         token: Optional[str] = None,
-        max_reconnect_attempts: int = 5,
-        reconnect_delay_seconds: float = 1.0,
+        timeout_seconds: float = 10.0,
     ) -> None:
         if not url:
-            raise ValueError("Camera WebSocket URL cannot be empty")
+            raise ValueError("Camera HTTP URL cannot be empty")
         self._url = url
         self._token = token
-        self._max_reconnect_attempts = max_reconnect_attempts
-        self._reconnect_delay_seconds = reconnect_delay_seconds
-        self._connection: Any = None
-        self._send_lock = asyncio.Lock()
+        self._timeout_seconds = timeout_seconds
         self.stream_id = str(uuid4())
 
-    async def connect(self) -> None:
-        try:
-            import websockets
-        except ImportError as error:
-            raise RuntimeError(
-                "Camera streaming requires: python3 -m pip install -r requirements.txt"
-            ) from error
-
-        kwargs: Dict[str, Any] = {}
+    def _post(self, message: bytes) -> None:
+        headers = {"Content-Type": "application/octet-stream"}
         if self._token:
-            headers = {"Authorization": f"Bearer {self._token}"}
-            parameters = inspect.signature(websockets.connect).parameters
-            header_name = (
-                "additional_headers"
-                if "additional_headers" in parameters
-                else "extra_headers"
-            )
-            kwargs[header_name] = headers
-        # No local port is fixed. The operating system selects an ephemeral
-        # source port for this outbound connection.
-        self._connection = await websockets.connect(self._url, **kwargs)
-
-    async def disconnect(self) -> None:
-        if self._connection is not None:
-            await self._connection.close()
-            self._connection = None
+            headers["Authorization"] = f"Bearer {self._token}"
+        request = urllib.request.Request(
+            self._url, data=message, headers=headers, method="POST"
+        )
+        with urllib.request.urlopen(request, timeout=self._timeout_seconds) as response:
+            response.read()
 
     async def send(self, frame: CameraFrame) -> None:
         message = encode_camera_frame(frame, self.stream_id)
-        async with self._send_lock:
-            for attempt in range(self._max_reconnect_attempts + 1):
-                try:
-                    if self._connection is None:
-                        await self.connect()
-                    await self._connection.send(message)
-                    return
-                except Exception:
-                    await self.disconnect()
-                    if attempt == self._max_reconnect_attempts:
-                        raise
-                    await asyncio.sleep(self._reconnect_delay_seconds)
+        await asyncio.to_thread(self._post, message)
 
     async def stream(self, sources: Mapping[str, CameraFrameSource]) -> None:
         if len(sources) != 3:
@@ -227,7 +248,4 @@ class CameraWebSocketSender:
             async for frame in source.frames():
                 await self.send(frame)
 
-        try:
-            await asyncio.gather(*(forward(source) for source in sources.values()))
-        finally:
-            await self.disconnect()
+        await asyncio.gather(*(forward(source) for source in sources.values()))

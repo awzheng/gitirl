@@ -65,7 +65,7 @@ Update each stage as evidence is gathered. Keep notes concrete: setup, observed 
 - **Pass condition:** Verification distinguishes success from failure and supports a safe retry path.
 - **Notes / blockers:**
 
-## 9. Multiple named states
+## 9. Multiple named states / git tag
 
 - [ ] **Status**
 - **Goal:** Save and select more than one desired physical state.

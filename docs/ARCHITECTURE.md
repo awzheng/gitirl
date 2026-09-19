@@ -2,71 +2,83 @@
 
 ## Responsibility
 
-`gitirl-agent` is the thin edge bridge between Daniel's cloud/backend and Ryan/Sarah's robot-side stack.
+`gitirl-agent` is a thin edge bridge:
 
 ```mermaid
 flowchart TD
-    D[Daniel cloud/backend] -->|high-level command| C[Cloud protocol boundary]
-    C --> E[gitirl-agent edge logic]
-    E -->|RobotAction| A[RobotAdapter]
-    A --> R[Ryan/Sarah robot stack]
-    R -->|WorldState / ActionResult| A
-    A --> V[Local normalization and verification]
-    V -->|structured result| C
-    C --> D
+    D[Daniel cloud<br/>Elastic, state, UI, NLP] -->|HTTP state/commands<br/>SSE notifications| C[Cloud boundary]
+    C --> N[Normalize and validate]
+    N --> A[High-level RobotAction]
+    A --> R[RobotAdapter]
+    R --> S[Ryan/Sarah robot stack]
+    S -->|observation / terminal result| R
+    R --> V[Verify; retry at most twice]
+    V -->|HTTP result/progress| C
 ```
 
-> **Do not move logic into gitirl-agent unless it benefits from being close to the robot or cleanly isolates cloud and robot interfaces.**
+**Do not move logic into gitirl-agent unless it benefits from being close to the robot or cleanly isolates cloud and robot interfaces.**
 
-The edge owns command validation, stable internal types, robot-boundary translation, and local verification/retry when that is useful near the hardware. It does not own AWS, Supabase, Elastic, SMS, frontend, authentication, cloud persistence, general cloud orchestration, BracketBot internals, perception algorithms, manipulation logic, or low-level control.
+It does not own AWS, Supabase, Elastic, SMS, frontend, authentication, cloud persistence/NLP/orchestration, BracketBot internals, perception, manipulation, VLA logic, or motor control.
 
-## Stable internal contracts
+## Boundaries
 
-- `GitIRLCommand`: normalized high-level command.
-- `WorldState` / `ObjectState`: generic robot observation.
-- `StateDiff`: current-versus-desired discrepancy.
-- `RobotAction`: high-level robot request.
-- `ActionResult`: normalized execution outcome.
-- `RobotAdapter`: the only robot execution boundary.
+Daniel-specific JSON is isolated to:
 
-Daniel's wire schema must not leak into planner, state, verification, or robot code. BracketBot APIs must not leak above `RobotAdapter`.
+- `protocol/daniel.py`: Daniel state/job payloads → internal types.
+- `transport/daniel_api.py`: HTTP requests and SSE subscription.
 
-## Core path
+Robot-specific behavior is isolated to:
 
-```text
-command
-→ validate
-→ desired/current state
-→ deterministic diff
-→ deterministic plan
-→ RobotAdapter
-→ fresh observation
-→ verify
-→ retry at most twice / return conflict or result
+- `robot/interface.py`: stable `observe` / `execute` contract.
+- `robot/http_adapter.py`: edge → robot HTTP client.
+- `robot/http_server.py`: small server template for Ryan/Sarah's backend.
+- `robot/bracketbot.py`: confirmed, read-only BBOS observations and unfinished integration seams.
+
+Planner, diff, verification, and orchestration know neither Daniel's wire schema nor BBOS.
+
+## Data path
+
+Daniel's current `/api/state` object pose is normalized as:
+
+```json
+{
+  "object_id": "mug_a1b2",
+  "position": {"x": 0.42, "y": 0.18, "z": 0.76},
+  "orientation": {"yaw": 15.0},
+  "metadata": {
+    "coordinate_frame": "canonical_world_z_up",
+    "position_unit": "m",
+    "yaw_unit": "deg"
+  }
+}
 ```
 
-This is intentionally not an agent platform, workflow engine, or general task planner.
+Daniel's confirmed canonical frame is +X forward from the anchor, +Y left, +Z up. Robot code must explicitly transform this to its required frame; the edge never swaps axes or units implicitly.
 
-## Direct versus backend-routed robot calls
+A confirmed Daniel job `moved` op becomes one `MOVE_OBJECT` with source and target `ObjectState`. Other operation types remain unsupported/conflicts until robot behavior exists.
 
-The current `RobotAdapter` is synchronous:
+## Why HTTP + SSE
 
-```python
-observe() -> WorldState
-execute(RobotAction) -> ActionResult
-```
+- HTTP is request/response, easy to inspect with `curl`, naturally handles terminal action results, and avoids connection state.
+- SSE is appropriate only for Daniel→edge notifications: ordered text events, built-in event IDs, simple reconnect/replay.
+- Robot actions remain HTTP because they need explicit acknowledgement, timeout, and terminal result.
+- Camera frames remain ordinary HTTP POSTs if the team keeps this path; video/media should not be put on SSE.
 
-Keep it for mocks and a direct robot integration. If robot traffic must route through Daniel, the conceptual adapter remains useful, but its implementation or the orchestration call site may need to become asynchronous and correlate observations/results by `request_id`. Do not build that remote adapter until routing, acknowledgement, timeout, and retry semantics are confirmed.
+Daniel's current SSE `job` event is only a summary and does not contain executable `ops`. No robot action can safely be triggered from it yet. Daniel must include the full job or provide a `GET job by id` endpoint plus an authenticated result endpoint.
 
-## Hackathon disposition
+## Confirmed robot facts
 
-| Area | Decision | Reason |
-| --- | --- | --- |
-| `orchestration/` | KEEP | Small restore/diff/commit integration path and bounded retry. |
-| `planner/` | KEEP | Minimal deterministic `MOVED → MOVE_OBJECT` translation. |
-| `state/` | KEEP | Shared cloud↔robot normalization and useful local fixtures. JSON storage is development-only. |
-| `protocol/` | SIMPLIFY WHEN DANIEL'S CONTRACT ARRIVES | Useful isolation boundary; current event set is provisional. |
-| `transport/` | KEEP | Small replaceable WebSocket client; do not expand before the contract. |
-| `media/` | DEFER | Useful experiment, but likely belongs directly between robot and cloud. Do not integrate further yet. |
+BBOS is local shared-memory IPC. Confirmed read topics include the head/left/right JPEG streams, camera status, and arm state. Control/torque topics are single-writer and are not opened here.
 
-Nothing currently warrants removal: the questionable pieces are isolated and do not complicate the core path unless the team chooses to use them.
+Sarah's current `precision_placement.py` is a local CLI for saved joint-pose replay. It has no JSON object-command/result contract and is not called by the edge.
+
+## Keep simple
+
+| Area | Decision |
+| --- | --- |
+| state/diff/planner/orchestration | Keep for mocks, deterministic restore, and verification. |
+| protocol/transport | Keep small; this is the cloud isolation seam. |
+| RobotAdapter | Keep; direct or HTTP implementations can change without changing core types. |
+| deterministic NLP | Keep as local fallback only. |
+| camera streaming | Deferred; do not expand tonight. |
+| agent frameworks/LLMs/vector DBs | Cloud-owned or out of scope here. |

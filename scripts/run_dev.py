@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run gitirl-agent against a WebSocket or a local development CLI."""
+"""Run gitirl-agent through the local CLI or JSONL development boundary."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
-from typing import Sequence
+from typing import Optional, Sequence
 
 # Keep the repository runnable before packaging/install decisions are made.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -30,16 +30,17 @@ from src.gitirl_agent.protocol.serialization import (
     serialize_message,
     utc_timestamp,
 )
+from src.gitirl_agent.robot.http_adapter import HTTPRobotAdapter
+from src.gitirl_agent.robot.interface import RobotAdapter
 from src.gitirl_agent.robot.mock import MockRobotAdapter
 from src.gitirl_agent.state.models import ObjectState, WorldState
 from src.gitirl_agent.state.store import InMemoryStateStore, JsonFileStateStore
-from src.gitirl_agent.transport.websocket_client import WebSocketTransport
 
 
 class DevApplication:
     """Small development composition root; not a production robot service."""
 
-    def __init__(self) -> None:
+    def __init__(self, robot: Optional[RobotAdapter] = None) -> None:
         desired = WorldState(
             objects=(ObjectState("box_A", label="box", position="X"),)
         )
@@ -53,7 +54,10 @@ class DevApplication:
             store = InMemoryStateStore()
             store.save("study", desired)
         self._parser = DeterministicIntentParser()
-        self._orchestrator = Orchestrator(store, MockRobotAdapter(current))
+        self._orchestrator = Orchestrator(
+            store,
+            robot if robot is not None else MockRobotAdapter(current),
+        )
 
     async def handle(
         self,
@@ -115,14 +119,6 @@ class DevApplication:
         return parsed, completed
 
 
-async def run_websocket(
-    transport: WebSocketTransport,
-    application: DevApplication,
-) -> None:
-    print("gitirl-agent: connecting using GITIRL_WS_URL")
-    await transport.listen(application.handle)
-
-
 async def run_cli(application: DevApplication) -> None:
     print("gitirl-agent local mode. Type a command, or 'quit' to exit.")
     while True:
@@ -180,15 +176,14 @@ async def main() -> None:
         help="read protocol JSON from stdin and write responses to stdout",
     )
     arguments = argument_parser.parse_args()
-    application = DevApplication()
+    robot = HTTPRobotAdapter.from_environment()
+    application = DevApplication(robot)
+    if robot is not None:
+        print("gitirl-agent: using robot HTTP API from GITIRL_ROBOT_BASE_URL")
     if arguments.jsonl:
         await run_jsonl(application)
         return
-    transport = WebSocketTransport.from_environment()
-    if transport is None:
-        await run_cli(application)
-    else:
-        await run_websocket(transport, application)
+    await run_cli(application)
 
 
 if __name__ == "__main__":

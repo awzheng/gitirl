@@ -1,79 +1,74 @@
 # gitirl-agent
 
-> Thin edge/integration bridge between GitIRL's cloud backend and robot-side software.
+> Edge bridge between Daniel's GitIRL cloud app and Ryan/Sarah's robot code.
 
 ```text
-Daniel's cloud/backend
-        ↓ high-level command
-gitirl-agent edge bridge
-        ↓ RobotAction through RobotAdapter
-Ryan/Sarah's robot stack
-        ↑ observation / action result
-gitirl-agent verification + normalization
-        ↑ structured result
-Daniel's cloud/backend
+Daniel cloud -- HTTP commands/state + SSE events --> gitirl-agent
+gitirl-agent -- high-level RobotAction over HTTP --> robot-side adapter
+robot-side adapter -- BBOS / Ryan-Sarah code --> BracketBot
 ```
 
-`gitirl-agent` receives high-level commands, validates and normalizes them into stable internal types, crosses the `RobotAdapter` boundary, optionally performs verification/retry close to the robot, and normalizes results for the cloud. It also provides mocks and local tools for integration testing.
+This repository validates cloud input, converts Daniel's object/state payloads to stable internal types, sends high-level actions across `RobotAdapter`, and normalizes observations/results. It may verify and retry near the robot when that is useful.
 
-> **Do not move logic into gitirl-agent unless it benefits from being close to the robot or cleanly isolates cloud and robot interfaces.**
+**Do not move logic here unless it benefits from being close to the robot or cleanly isolates cloud and robot interfaces.**
 
 ## Ownership
 
-This repository owns:
+This repo owns:
 
-- Stable `GitIRLCommand`, `WorldState`, `StateDiff`, `RobotAction`, and result types.
-- Validation and conservative diff-to-action translation.
-- `RobotAdapter` as the robot boundary.
-- Local restore, diff, commit, verification, and maximum-two-retry behavior.
-- Provisional protocol/transport adapters, mocks, JSONL mode, and tests.
+- Daniel JSON → `WorldState` / `RobotAction` translation.
+- The robot-neutral `RobotAdapter` boundary.
+- Conservative diff, restore, verification, and at-most-two retries.
+- HTTP/SSE adapters, JSONL/CLI development tools, mocks, and tests.
 
-This repository does **not** own:
+It does **not** own AWS, Supabase, Elastic, SMS, frontend, authentication, cloud persistence, cloud NLP, low-level motor control, BracketBot daemons, perception, manipulation, or VLA behavior.
 
-- AWS, Supabase, Elastic, SMS, frontend, authentication, cloud persistence, or general cloud orchestration.
-- General-purpose agents, LLM infrastructure, or cloud-side NLP.
-- BracketBot internals, perception implementation, manipulation logic, joints, trajectories, or low-level motor control.
-- Production camera capture, panorama stitching, or media infrastructure.
+Only `moved` discrepancies become `MOVE_OBJECT`. Added, missing, relational, malformed, or unsupported work is reported instead of guessed.
 
-Daniel owns the first category. Ryan and Sarah own the robot-specific category. Natural-language parsing here is a replaceable development fallback; the reliable input is a structured command such as `{"command":"restore","target_state":"study"}`.
+## Transport choice
 
-## Current core
+- **HTTP JSON** for commands, state snapshots, robot actions, and terminal results.
+- **SSE** for low-rate Daniel→edge notifications and progress events.
+- **HTTP POST** for optional camera frames; this is deferred.
+- **No WebSockets.** Continuous bidirectional transport is unnecessary for the current job model.
 
-```text
-command
-→ validate
-→ load desired state / observe current state
-→ deterministic diff
-→ small deterministic plan
-→ RobotAdapter
-→ re-observe
-→ verify
-→ retry at most twice or return result
+Daniel-specific shapes live in [`protocol/daniel.py`](src/gitirl_agent/protocol/daniel.py) and [`transport/daniel_api.py`](src/gitirl_agent/transport/daniel_api.py). Robot-specific code stays behind [`robot/interface.py`](src/gitirl_agent/robot/interface.py).
+
+## Current robot boundary
+
+```python
+observe() -> WorldState
+execute(action: RobotAction) -> ActionResult
 ```
 
-Only `MOVED` currently produces `MOVE_OBJECT`. Missing, added, relational, and unknown differences become conflicts instead of guessed behavior.
+The robot-side HTTP template exposes `GET /v1/observation` and `POST /v1/actions`. Ryan/Sarah supply the backend; this repo does not call joints, torque, drive, or Sarah's `precision_placement.py` directly.
 
-## Integration boundaries
-
-- Daniel-specific message schemas belong in `src/gitirl_agent/protocol/` and connection behavior in `src/gitirl_agent/transport/`.
-- Robot-specific translation belongs behind [robot/interface.py](src/gitirl_agent/robot/interface.py).
-- Planner, state, and verification code must not learn Daniel's wire schema or BracketBot APIs.
-- The current `RobotAdapter` is synchronous and safe for mock/direct integration. If robot calls route asynchronously through Daniel, adapt or replace the adapter/orchestration call site after that contract is known.
-
-See [ARCHITECTURE.md](docs/ARCHITECTURE.md), [INTEGRATION.md](docs/INTEGRATION.md), and [PROTOCOL.md](docs/PROTOCOL.md) before changing integration code.
+Sarah's current script saves/replays named joint poses locally and opens safety-sensitive BBOS writers during `goto`. It is ongoing robot work, not yet an object-placement API.
 
 ## Run
 
-Interactive:
+Interactive mock:
 
 ```bash
 python3 scripts/run_dev.py
 ```
 
-JSONL process integration:
+JSONL:
 
 ```bash
 python3 scripts/run_dev.py --jsonl
+```
+
+Mock robot HTTP API:
+
+```bash
+python3 scripts/run_robot_api.py --mock
+```
+
+Listen to Daniel's SSE feed:
+
+```bash
+GITIRL_CLOUD_BASE_URL=http://127.0.0.1:8000 python3 scripts/listen_cloud.py
 ```
 
 Tests:
@@ -82,16 +77,4 @@ Tests:
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 ```
 
-Optional WebSocket dependency:
-
-```bash
-python3 -m pip install -r requirements.txt
-```
-
-Optional local state file:
-
-```bash
-GITIRL_STATE_FILE=.gitirl/states.json python3 scripts/run_dev.py
-```
-
-The WebSocket and camera protocols are provisional until Daniel provides authoritative contracts. The camera scaffold is deferred unless the team confirms that media should pass through this process.
+There are no required third-party runtime dependencies. See [`docs/INTEGRATION.md`](docs/INTEGRATION.md) before connecting real services.
