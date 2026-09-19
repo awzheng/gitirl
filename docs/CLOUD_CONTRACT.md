@@ -129,3 +129,61 @@ than failing.
 
 Note we say `revert` where you say `restore`. They are **not** aliases and we have deliberately
 not mapped one onto the other; if you need `revert` semantics, ask and we will add the verb.
+
+---
+
+## 7. You do NOT need Elastic or OpenAI keys — you already have both, as endpoints
+
+Your `docs/ARCHITECTURE.md` already draws this line: *"Daniel owns UI, Elastic search, object
+history, cloud data, authentication, and any NLP."* This section is just the how.
+
+The cloud holds the Elastic and OpenAI credentials and does the work. You call an endpoint with
+the token you already have. **Do not ask for the raw keys, and do not put them in this repo —
+it is public, and a key committed here is scraped within minutes.**
+
+### Semantic search over the room — `GET /api/search`
+
+```
+GET /api/search?q=<text>&limit=20&all_time=true      no token
+```
+
+This is hybrid retrieval (BM25 + dense vectors + reranking), not a keyword filter. Verified live:
+
+```
+GET /api/search?q=something%20to%20write%20with
+  → marker_c3d4    1.1346
+    notebook_5a0c  1.0355
+    bowl_0c55      1.0276
+```
+
+The query contains none of those words. BM25 alone cannot get from *"something to write with"* to
+a marker — that hit comes from the vector side. Use this instead of matching on `class` strings.
+
+The response carries `retriever`, `reranked`, `bm25_fields`, `took_ms` and `provenance`, so you
+can see **how** a hit was produced rather than trusting a bare score. `q` is 1–200 chars,
+`limit` 1–50, and `all_time=false` scopes to a `head`.
+
+### The LLM leg — `POST /api/seer/ask`
+
+```
+POST /api/seer/ask   {"capture_id": "cap_0912"}
+GET  /api/seer/status
+```
+
+It takes a **`capture_id`, not a free-text question**: it finds that capture's Sentry issue,
+starts Seer on it and polls. A `stumped` result is an **answer** at HTTP 200 — never an error and
+never fabricated.
+
+### Why this is the right shape, not us being precious
+
+- One credential to revoke. If `GITIRL_CLOUD_TOKEN` leaks, we rotate one value. If an Elastic or
+  OpenAI key leaks, that is credential rotation plus a spend audit.
+- Every call runs through the cloud, so it lands in our Sentry traces and Elastic logs. With raw
+  keys your usage would be invisible to us and undebuggable together.
+- Data rules stay enforced in one place: Elasticsearch first, a fixture only when ES is genuinely
+  unavailable and always labelled `source`, and a value that was not recorded is `null` — never a
+  made-up number. That guarantee cannot hold if callers query the cluster directly.
+
+**If you need a capability these two do not cover, ask for the endpoint, not the key.** Adding an
+endpoint takes minutes and keeps your edge dependency-free — which is worth protecting, since your
+`requirements.txt` currently reads *"No runtime dependencies."*
