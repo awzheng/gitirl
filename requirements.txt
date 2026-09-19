@@ -1,0 +1,2 @@
+# Optional: required only when GITIRL_WS_URL is set.
+websockets>=12,<16
